@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -31,6 +32,7 @@
     </div>
 
     <button class="btn btn-success mb-3" onclick="toggleTicketForm()">Nuevo Ticket</button>
+    <button class="btn btn-outline-primary mb-3 ms-2" onclick="exportToCSV()">Exportar a CSV</button>
 
     <div id="ticket-form" class="card p-3 mb-4 d-none">
       <h4>Crear Ticket</h4>
@@ -46,7 +48,6 @@
     </div>
 
     <div id="tickets-list"></div>
-
     <h4 class="mt-5">Tickets por Prioridad</h4>
     <canvas id="chartPrioridad" width="400" height="200"></canvas>
   </div>
@@ -55,7 +56,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
   import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-  import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+  import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyC-0INsUQnbWPiw5iVdVWruHQlTfpvkbUQ",
@@ -70,18 +71,15 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  const loginView = document.getElementById('login-view');
-  const dashboardView = document.getElementById('dashboard-view');
-
   onAuthStateChanged(auth, user => {
     if (user) {
       document.getElementById('user-email').textContent = user.email;
-      loginView.classList.add('d-none');
-      dashboardView.classList.remove('d-none');
+      document.getElementById('login-view').classList.add('d-none');
+      document.getElementById('dashboard-view').classList.remove('d-none');
       loadTickets();
     } else {
-      loginView.classList.remove('d-none');
-      dashboardView.classList.add('d-none');
+      document.getElementById('login-view').classList.remove('d-none');
+      document.getElementById('dashboard-view').classList.add('d-none');
     }
   });
 
@@ -107,24 +105,19 @@
 
   window.resetPassword = async () => {
     const email = document.getElementById('email').value;
-    if (!email) {
-      return Swal.fire('Atención', 'Por favor ingresa tu correo electrónico para restaurar tu contraseña.', 'warning');
-    }
+    if (!email) return Swal.fire('Atención', 'Ingresa tu correo.', 'warning');
     try {
       await sendPasswordResetEmail(auth, email);
-      Swal.fire('Correo enviado', 'Revisa tu bandeja de entrada para restaurar tu contraseña.', 'info');
+      Swal.fire('Enviado', 'Revisa tu correo.', 'info');
     } catch (error) {
       Swal.fire('Error', error.message, 'error');
     }
   }
 
-  window.logout = async () => {
-    await signOut(auth);
-  }
+  window.logout = () => signOut(auth);
 
   window.toggleTicketForm = () => {
-    const form = document.getElementById('ticket-form');
-    form.classList.toggle('d-none');
+    document.getElementById('ticket-form').classList.toggle('d-none');
   }
 
   window.createTicket = async () => {
@@ -132,12 +125,15 @@
     const desc = document.getElementById('ticket-desc').value;
     const priority = document.getElementById('ticket-priority').value;
     const type = document.getElementById('ticket-type').value;
+    const folio = 'FOLIO-' + Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
+
     try {
       await addDoc(collection(db, "tickets"), {
         title,
         description: desc,
         priority,
         type,
+        folio,
         createdAt: new Date().toISOString()
       });
       Swal.fire('Éxito', 'Ticket creado con éxito', 'success');
@@ -147,34 +143,62 @@
     }
   }
 
-  async function loadTickets() {
-    const listContainer = document.getElementById('tickets-list');
-    listContainer.innerHTML = '';
+  window.exportToCSV = async () => {
     const querySnapshot = await getDocs(collection(db, "tickets"));
-    let prioridades = { Alta: 0, Media: 0, Baja: 0 };
-
+    let csv = "Título,Descripción,Prioridad,Tipo,Folio,Fecha\n";
     querySnapshot.forEach(doc => {
-      const data = doc.data();
-      listContainer.innerHTML += `
+      const d = doc.data();
+      csv += `${d.title},${d.description},${d.priority},${d.type},${d.folio},${d.createdAt}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "tickets.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  window.exportToPDF = (ticket) => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const folio = ticket.folio || 'FOLIO-' + Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
+    doc.setFontSize(14);
+    doc.text(`Folio: ${folio}`, 10, 20);
+    doc.text(`Título: ${ticket.title}`, 10, 30);
+    doc.text(`Descripción: ${ticket.description}`, 10, 40);
+    doc.text(`Prioridad: ${ticket.priority}`, 10, 50);
+    doc.text(`Tipo: ${ticket.type}`, 10, 60);
+    doc.text(`Fecha: ${ticket.createdAt}`, 10, 70);
+    doc.save(`${folio}_${ticket.title.replace(/\s+/g, '_')}.pdf`);
+  }
+
+  async function loadTickets() {
+    const list = document.getElementById('tickets-list');
+    list.innerHTML = '';
+    const snapshot = await getDocs(collection(db, "tickets"));
+    let prioridades = { Alta: 0, Media: 0, Baja: 0 };
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      list.innerHTML += `
         <div class="card mb-2">
           <div class="card-body">
-            <h5 class="card-title">${data.title}</h5>
-            <p class="card-text">${data.description}</p>
-            <span class="badge bg-${getBadgeColor(data.priority)}">${data.priority}</span>
-            <small class="d-block text-muted">${data.createdAt}</small>
+            <h5 class="card-title">${d.title}</h5>
+            <p class="card-text">${d.description}</p>
+            <span class="badge bg-${getBadgeColor(d.priority)}">${d.priority}</span>
+            <span class="d-block"><strong>Folio:</strong> ${d.folio || 'Sin folio'}</span>
+            <small class="d-block text-muted">${d.createdAt}</small>
+            <button class="btn btn-sm btn-outline-dark mt-2" onclick='exportToPDF(${JSON.stringify(d)})'>Exportar PDF</button>
           </div>
         </div>
       `;
-
-      if (data.priority in prioridades) {
-        prioridades[data.priority]++;
-      }
+      if (d.priority in prioridades) prioridades[d.priority]++;
     });
-
     renderChart(prioridades);
   }
 
-  function renderChart(prioridades) {
+  function renderChart(data) {
     const ctx = document.getElementById('chartPrioridad').getContext('2d');
     new Chart(ctx, {
       type: 'bar',
@@ -182,20 +206,15 @@
         labels: ['Alta', 'Media', 'Baja'],
         datasets: [{
           label: 'Tickets por Prioridad',
-          data: [prioridades.Alta, prioridades.Media, prioridades.Baja],
+          data: [data.Alta, data.Media, data.Baja],
           backgroundColor: ['#dc3545', '#ffc107', '#28a745']
         }]
       }
     });
   }
 
-  function getBadgeColor(priority) {
-    switch (priority) {
-      case 'Alta': return 'danger';
-      case 'Media': return 'warning';
-      case 'Baja': return 'success';
-      default: return 'secondary';
-    }
+  function getBadgeColor(p) {
+    return p === 'Alta' ? 'danger' : p === 'Media' ? 'warning' : 'success';
   }
 </script>
 
